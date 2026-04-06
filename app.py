@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Math formula LaTeX-OCR service", version="2.0")
 
+# serve static assets (e.g. favicon)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # add cors middleware to allow the browser frontend (index.html/ results.html)
 # to call the fastapi endpoints via fetch
 app.add_middleware(
@@ -66,13 +69,15 @@ def setup_latex_ocr_model(): # initializes the pix2tex LatexOCR model
         raise
 
 # initialize the model once at process start so all requests reuse the same instance
+MODEL_LOAD_ERROR = None
 try:
     MODEL = setup_latex_ocr_model()
     MODEL_LOADED = True
-except:
+except Exception as e:
     MODEL = None
     MODEL_LOADED = False
-    logger.warning("latex-ocr model failed to load")
+    MODEL_LOAD_ERROR = f"{type(e).__name__}: {e}"
+    logger.exception("latex-ocr model failed to load")
 
 load_dotenv()
 AZURE_ENDPOINT = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT")
@@ -307,7 +312,7 @@ async def extract_boxes(request: BoxExtractionRequest): # extracts latex from us
     if engine == "local" and not MODEL_LOADED:
         raise HTTPException(
             status_code=503,
-            detail="LaTeX-OCR model not loaded"
+            detail=f"LaTeX-OCR model not loaded. {MODEL_LOAD_ERROR or ''}".strip()
         )
     if engine == "azure" and not AZURE_READY:
         raise HTTPException(

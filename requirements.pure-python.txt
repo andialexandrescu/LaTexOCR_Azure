@@ -1,0 +1,19 @@
+# Pure-Python (no Docker) friendly requirements.
+# Designed to work with newer Python versions (e.g. 3.12/3.13) by avoiding heavy GPU/ML deps.
+# Note: Without pix2tex installed, the app still runs, but the local LaTeX OCR engine will be unavailable.
+
+fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+
+pillow
+numpy
+opencv-python-headless
+pymupdf
+
+pdf2image
+PyPDF2
+
+azure-ai-documentintelligence
+azure-core

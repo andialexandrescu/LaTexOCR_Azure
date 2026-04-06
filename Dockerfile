@@ -6,6 +6,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     poppler-utils \
     libmagic1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -17,6 +18,7 @@ COPY formula_detector.py .
 COPY index.html .
 COPY results.html .
 COPY floating-formulas.txt .
+COPY static ./static
 
 # .env placeholder that will be overridden by azure environment variables at runtime
 RUN echo "Azure credentials will be set via environment variables" > .env

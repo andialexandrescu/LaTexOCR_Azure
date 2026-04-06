@@ -1,0 +1,26 @@
+# Pure-Python entrypoint (python app.py) WITH pix2tex installed.
+# Uses Python 3.11 because pix2tex/torch support is much more reliable here than 3.13.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    poppler-utils \
+    libmagic1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app.py .
+COPY formula_detector.py .
+COPY index.html .
+COPY results.html .
+COPY floating-formulas.txt .
+COPY static ./static
+
+EXPOSE 8000
+
+CMD ["python", "app.py"]
