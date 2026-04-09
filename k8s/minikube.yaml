@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: latexocr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: latexocr
+  template:
+    metadata:
+      labels:
+        app: latexocr
+    spec:
+      containers:
+        - name: latexocr
+          image: latexocr:pure-python
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          env:
+            - name: DOCUMENT_INTELLIGENCE_ENDPOINT
+              value: ""
+            - name: DOCUMENT_INTELLIGENCE_SUBSCRIPTION_KEY
+              value: ""
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: latexocr
+spec:
+  selector:
+    app: latexocr
+  type: NodePort
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      nodePort: 30080

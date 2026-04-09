@@ -3,6 +3,7 @@ import io
 import logging
 import tempfile
 import base64
+import threading
 from typing import Dict, List, Tuple
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
@@ -70,6 +71,37 @@ def setup_latex_ocr_model(): # initializes the pix2tex LatexOCR model
 
 # initialize the model once at process start so all requests reuse the same instance
 MODEL_LOAD_ERROR = None
+_MODEL_LOCK = threading.Lock()
+
+
+def ensure_latex_ocr_model_loaded() -> None:
+    """Ensure the global pix2tex model is loaded.
+
+    In some environments (notably containers) the initial model load can fail due
+    to transient issues (e.g. network during weight download). Without a retry,
+    the service would return 503 forever. This function makes model loading
+    retryable and thread-safe.
+    """
+
+    global MODEL, MODEL_LOADED, MODEL_LOAD_ERROR
+
+    if MODEL_LOADED and MODEL is not None:
+        return
+
+    with _MODEL_LOCK:
+        if MODEL_LOADED and MODEL is not None:
+            return
+
+        try:
+            MODEL = setup_latex_ocr_model()
+            MODEL_LOADED = True
+            MODEL_LOAD_ERROR = None
+        except Exception as e:
+            MODEL = None
+            MODEL_LOADED = False
+            MODEL_LOAD_ERROR = f"{type(e).__name__}: {e}"
+            logger.exception("latex-ocr model failed to load")
+
 try:
     MODEL = setup_latex_ocr_model()
     MODEL_LOADED = True
@@ -151,9 +183,12 @@ def azure_analyze_image_bytes(img_bytes: bytes):
 @app.post("/api/simple-extract")
 async def simple_extract(file: UploadFile = File(...)): # simplified endpoint that uses FormulaDetector to automatically detect and extract formulas from pdf pages
     if not MODEL_LOADED:
+        # Retry model loading on demand to recover from transient startup failures
+        ensure_latex_ocr_model_loaded()
+    if not MODEL_LOADED:
         raise HTTPException(
             status_code=503,
-            detail="LaTeX-OCR model not loaded."
+            detail=f"LaTeX-OCR model not loaded. {MODEL_LOAD_ERROR or ''}".strip()
         )
     
     try:
@@ -309,6 +344,9 @@ async def extract_boxes(request: BoxExtractionRequest): # extracts latex from us
     # the backend decodes the base64 payload and crops per box
     engine = (request.engine or "local").lower()
 
+    if engine == "local" and not MODEL_LOADED:
+        # Retry model loading on demand to recover from transient startup failures
+        ensure_latex_ocr_model_loaded()
     if engine == "local" and not MODEL_LOADED:
         raise HTTPException(
             status_code=503,
