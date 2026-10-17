@@ -30,9 +30,9 @@
             0%, 100% { transform: translateY(0px); }
             50% { transform: translateY(-18px); }
         }
-        .main-container { max-width: 1400px; margin: 0 auto; position: relative; z-index: 2; }
-        .canvas-wrapper { border: 2px solid #fff; border-radius: 10px; overflow: auto; max-height: 70vh; background: rgba(255,255,255,0.95); display: inline-block; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
-        #canvas { display: block; cursor: crosshair; }
+        .main-container { max-width: 1600px; width: 100%;margin: 0 auto; position: relative; z-index: 2; }
+        .canvas-wrapper { border: 2px solid #fff; border-radius: 10px; overflow: auto; max-width: 100%; max-height: 100%; background: rgba(255,255,255,0.95); display: inline-block; box-shadow: 0 4px 15px rgba(0,0,0,0.2); vertical-align: top;}
+        #canvas { display: block; cursor: crosshair; max-width: none;}
         .box-legend { display: flex; gap: 20px; justify-content: center; margin-top: 10px; flex-wrap: wrap; font-size: 12px; color: white; }
         .legend-item { display: flex; align-items: center; gap: 5px; }
         .legend-auto { color: #0066ff; font-weight: bold; }
@@ -157,6 +157,7 @@
         // it maintains allPagesData with canvas-space boxes for each page the user navigates on
         // after extraction, results and page bitmaps are persisted in sessionStorage for the /results page to render
         const canvas = document.getElementById('canvas');
+        const canvasWrapper = document.querySelector('.canvas-wrapper');
         const ctx = canvas.getContext('2d');
         let img = null;
         let originalImageData = null; // stores the unannotated bitmap used for cropping
@@ -278,16 +279,16 @@
         
         function setupCanvas() {
             // set canvas bitmap size to the current page image size so coordinates match the cropping
-            canvas.width = img.width;
-            canvas.height = img.height;
+            canvas.width = window.screen.width;
+            canvas.height = window.screen.height;
             redrawCanvas(); // draw the current page image on the canvas
             
             // tempCanvas stores the original image data without overlays
             const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = img.width;
-            tempCanvas.height = img.height;
-            const tempCtx = tempCanvas.getContext('2d');
-            tempCtx.drawImage(img, 0, 0);
+            tempCanvas.width = window.screen.width;
+            tempCanvas.height = window.screen.height;
+            const tempCtx = tempCanvas.getContext("2d");
+            tempCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
             originalImageData = tempCanvas.toDataURL('image/png');
             
             document.getElementById('canvasContainer').style.display = 'block'; // show canvas and controls once an image is ready
@@ -303,7 +304,7 @@
         
         function redrawCanvas() { // draw all boxes for each current page so users can confirm selection
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             
             autoDetectedBoxes.forEach((box, index) => { // auto detected boxes in blue
                 ctx.strokeStyle = '#0066ff';
@@ -337,10 +338,27 @@
         
         function draw(e) {
             if (!isDrawing) return;
+
+            const rect = canvasWrapper.getBoundingClientRect();
+            const edge = 50;
+            const speed = 10;
+
+            // Auto-scroll the image container
+            if (e.clientY > rect.bottom - edge) {
+                canvasWrapper.scrollTop += speed;
+            } else if (e.clientY < rect.top + edge) {
+                canvasWrapper.scrollTop -= speed;
+            }
+
+            if (e.clientX > rect.right - edge) {
+                canvasWrapper.scrollLeft += speed;
+            } else if (e.clientX < rect.left + edge) {
+                canvasWrapper.scrollLeft -= speed;
+            }
             
-            const rect = canvas.getBoundingClientRect();
-            const currentX = e.clientX - rect.left;
-            const currentY = e.clientY - rect.top;
+            const canvasRect = canvas.getBoundingClientRect();
+            const currentX = e.clientX - canvasRect.left;
+            const currentY = e.clientY - canvasRect.top;
             
             redrawCanvas(); // redraw the canvas to update the live rectangle without permanently modifying the bitmap
             
