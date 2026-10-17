@@ -31,8 +31,8 @@
             50% { transform: translateY(-18px); }
         }
         .main-container { max-width: 1600px; width: 100%;margin: 0 auto; position: relative; z-index: 2; }
-        .canvas-wrapper { border: 2px solid #fff; border-radius: 10px; overflow: auto; max-width: 100%; max-height: 100%; background: rgba(255,255,255,0.95); display: inline-block; box-shadow: 0 4px 15px rgba(0,0,0,0.2); vertical-align: top;}
-        #canvas { display: block; cursor: crosshair; max-width: none;}
+        .canvas-wrapper { border: 2px solid #fff; border-radius: 10px; overflow: auto; width:100%; max-width: 100%; max-height: 80hv; background: rgba(255,255,255,0.95); display: block; box-shadow: 0 4px 15px rgba(0,0,0,0.2);}
+        #canvas { display: block; cursor: crosshair; width: 100%; height: auto; touch-action: none;}
         .box-legend { display: flex; gap: 20px; justify-content: center; margin-top: 10px; flex-wrap: wrap; font-size: 12px; color: white; }
         .legend-item { display: flex; align-items: center; gap: 5px; }
         .legend-auto { color: #0066ff; font-weight: bold; }
@@ -279,16 +279,16 @@
         
         function setupCanvas() {
             // set canvas bitmap size to the current page image size so coordinates match the cropping
-            canvas.width = window.screen.width;
-            canvas.height = window.screen.height;
+            canvas.width = img.width;
+            canvas.height = img.height;
             redrawCanvas(); // draw the current page image on the canvas
             
             // tempCanvas stores the original image data without overlays
             const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = window.screen.width;
-            tempCanvas.height = window.screen.height;
+            tempCanvas.width = img.width;
+            tempCanvas.height = img.height;
             const tempCtx = tempCanvas.getContext("2d");
-            tempCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            tempCtx.drawImage(img, 0, 0);
             originalImageData = tempCanvas.toDataURL('image/png');
             
             document.getElementById('canvasContainer').style.display = 'block'; // show canvas and controls once an image is ready
@@ -296,15 +296,21 @@
             document.getElementById('boxList').style.display = 'block';
             document.getElementById('engineSelector').style.display = 'flex';
             
-            canvas.addEventListener('mousedown', startDrawing); // the selected boxes are now identifiable in terms of coordinates
-            canvas.addEventListener('mousemove', draw);
-            canvas.addEventListener('mouseup', stopDrawing);
-            canvas.addEventListener('mouseout', stopDrawing);
+            
+            if (!canvas.dataset.handlersRegistered) {
+                canvas.addEventListener('pointerdown', startDrawing);
+                canvas.addEventListener('pointermove', draw);
+                canvas.addEventListener('pointerup', stopDrawing);
+                canvas.addEventListener('pointercancel', stopDrawing);
+
+                canvas.dataset.handlersRegistered = 'true';
+            }
+
         }
         
         function redrawCanvas() { // draw all boxes for each current page so users can confirm selection
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
             
             autoDetectedBoxes.forEach((box, index) => { // auto detected boxes in blue
                 ctx.strokeStyle = '#0066ff';
@@ -328,59 +334,66 @@
                 ctx.fillText(`#${index + 1}`, box.x + 5, box.y + 25);
             });
         }
+
+
+        function getCanvasCoordinates(e) {
+            const rect = canvas.getBoundingClientRect();
+
+            return {
+                x: (e.clientX - rect.left) * (canvas.width / rect.width),
+                y: (e.clientY - rect.top) * (canvas.height / rect.height)
+            };
+        }
+
         
         function startDrawing(e) {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            if (isDrawing) return;
+
+            e.preventDefault();
             isDrawing = true;
-            const rect = canvas.getBoundingClientRect();
-            startX = e.clientX - rect.left;
-            startY = e.clientY - rect.top;
+            canvas.setPointerCapture(e.pointerId);
+            const pos = getCanvasCoordinates(e);
+            startX = pos.x;
+            startY = pos.y;
         }
         
         function draw(e) {
             if (!isDrawing) return;
 
-            const rect = canvasWrapper.getBoundingClientRect();
-            const edge = 20;
-            const speed = 10;
+            e.preventDefault();
 
-            // Auto-scroll the image container
-            if (e.clientY > rect.bottom - edge) {
-                canvasWrapper.scrollTop += speed;
-            } else if (e.clientY < rect.top + edge) {
-                canvasWrapper.scrollTop -= speed;
-            }
+            const pos = getCanvasCoordinates(e);
+            const currentX = pos.x;
+            const currentY = pos.y;
 
-            if (e.clientX > rect.right - edge) {
-                canvasWrapper.scrollLeft += speed;
-            } else if (e.clientX < rect.left + edge) {
-                canvasWrapper.scrollLeft -= speed;
-            }
-            
-            const canvasRect = canvas.getBoundingClientRect();
-            const currentX = e.clientX - canvasRect.left;
-            const currentY = e.clientY - canvasRect.top;
-            
-            redrawCanvas(); // redraw the canvas to update the live rectangle without permanently modifying the bitmap
-            
+            redrawCanvas();
+
             ctx.strokeStyle = '#00ff00';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 3;
             ctx.setLineDash([5, 5]);
-            ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
+            ctx.strokeRect(
+                startX,
+                startY,
+                currentX - startX,
+                currentY - startY
+            );
             ctx.setLineDash([]);
         }
         
         function stopDrawing(e) {
             if (!isDrawing) return;
+
             isDrawing = false;
-            
-            const rect = canvas.getBoundingClientRect();
-            const endX = e.clientX - rect.left;
-            const endY = e.clientY - rect.top;
-            
+
+            const pos = getCanvasCoordinates(e);
+            const endX = pos.x;
+            const endY = pos.y;
+
             const width = endX - startX;
             const height = endY - startY;
-            
-            if (Math.abs(width) > 10 && Math.abs(height) > 10) { // only add box if geometry exceeds a small threshold to avoid accidental clicks
+
+            if (Math.abs(width) > 10 && Math.abs(height) > 10) {
                 boxes.push({
                     id: `box_${boxIdCounter++}`,
                     x: Math.min(startX, endX),
@@ -388,13 +401,17 @@
                     width: Math.abs(width),
                     height: Math.abs(height)
                 });
-                
-                // persist on the current page so results on multiple pages reflect this selection
+
                 allPagesData[currentPageIndex].boxes = boxes;
                 updateBoxList();
                 redrawCanvas();
             }
+
+            if (canvas.hasPointerCapture(e.pointerId)) {
+                canvas.releasePointerCapture(e.pointerId);
+            }
         }
+
         
         function updateBoxList() {
             document.getElementById('boxCount').textContent = boxes.length;
