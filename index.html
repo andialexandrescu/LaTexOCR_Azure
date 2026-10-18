@@ -30,9 +30,9 @@
             0%, 100% { transform: translateY(0px); }
             50% { transform: translateY(-18px); }
         }
-        .main-container { max-width: 1400px; margin: 0 auto; position: relative; z-index: 2; }
-        .canvas-wrapper { border: 2px solid #fff; border-radius: 10px; overflow: auto; max-height: 70vh; background: rgba(255,255,255,0.95); display: inline-block; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
-        #canvas { display: block; cursor: crosshair; }
+        .main-container { max-width: 1600px; width: 100%;margin: 0 auto; position: relative; z-index: 2; }
+        .canvas-wrapper { border: 2px solid #fff; border-radius: 10px; overflow: auto; width:100%; max-width: 100%; max-height: 80hv; background: rgba(255,255,255,0.95); display: block; box-shadow: 0 4px 15px rgba(0,0,0,0.2);}
+        #canvas { display: block; cursor: crosshair; width: 100%; height: auto; touch-action: none;}
         .box-legend { display: flex; gap: 20px; justify-content: center; margin-top: 10px; flex-wrap: wrap; font-size: 12px; color: white; }
         .legend-item { display: flex; align-items: center; gap: 5px; }
         .legend-auto { color: #0066ff; font-weight: bold; }
@@ -47,7 +47,7 @@
     <div id="floatingFormulas"></div>
     
     <div class="container main-container">
-        <h1 class="text-center mb-2 text-white">LaTeX OCR Formula Extractor, based on pix2tex</h1>
+        <h1 class="text-center mb-2 text-white">LaTeX OCR Formula Extractor</h1>
         <p class="text-center text-white mb-4" style="opacity: 0.9;">Upload an image or pdf and draw boxes to encapsulate separate formulas in order to extract LaTeX code</p>
         <div class="text-center mb-3">
             <a href="https://github.com/andialexandrescu" target="_blank" rel="noopener" class="text-white text-decoration-none">
@@ -60,15 +60,18 @@
         <div class="alert alert-light mb-4" style="background: rgba(255,255,255,0.95); border: none; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
             <h5>Usage</h5>
             <ol class="mb-0">
-                <li>Upload an image (.png, .jpg) or a pdf file</li>
+                <li>Upload an image (.png, .jpg, .jpeg) or a pdf file</li>
                 <li>Draw boxes around the mathematical formulas you want to extract</li>
+                <li>Keep the following in mind when choosing extraction engine</li> 
+                <ul>- If choosing pix2tex don't inlcude text since it may cause issues with the formula extraction</ul>
+                <ul>- Choose UniMERNet for handwritten formulas or if including text. It may perform better overall</ul>
                 <li>View your results on the page you will be redirected to</li>
             </ol>
         </div>
         
         <div class="upload-section text-center mb-3" id="uploadSection" onclick="document.getElementById('fileInput').click()">
             <h3>Click to select file</h3>
-            <p class="text-white">.pdf, .png, .jpg (for pdf files, all pages will be processed)</p>
+            <p class="text-white">.pdf, .png, .jpg, .jpeg (for pdf files, all pages will be processed)</p>
             <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg" class="d-none">
         </div>
         
@@ -99,12 +102,16 @@
             <span class="fw-bold">Extraction engine:</span>
             <div class="form-check form-check-inline">
                 <input class="form-check-input" type="radio" name="engineOption" id="engineLocal" value="local" checked>
-                <label class="form-check-label" for="engineLocal">Local/ pix2tex LaTex-OCR model</label>
+                <label class="form-check-label" for="engineLocal">pix2tex (no text)</label>
             </div>
             <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="engineOption" id="engineUniMERNet" value="unimernet">
+                <label class="form-check-label" for="engineUniMERNet">UniMERNet</label>
+            </div>
+            <!-- <div class="form-check form-check-inline">
                 <input class="form-check-input" type="radio" name="engineOption" id="engineAzure" value="azure">
                 <label class="form-check-label" for="engineAzure">Azure Document Intelligence (Form Recognizer Read)</label>
-            </div>
+            </div> -->
         </div>
         
         <div class="d-flex justify-content-center gap-2 flex-wrap mb-3" id="controls" style="display: none;">
@@ -143,7 +150,7 @@
         </div>
         
         <div class="text-center my-4" id="loading" style="display: none;">
-            <p class="mt-2 text-white">Processing your formulas...</p>
+            <p class="mt-2 text-white">Processing formulas...</p>
         </div>
         
         <div class="alert" id="status" style="display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.1);"></div>
@@ -157,6 +164,7 @@
         // it maintains allPagesData with canvas-space boxes for each page the user navigates on
         // after extraction, results and page bitmaps are persisted in sessionStorage for the /results page to render
         const canvas = document.getElementById('canvas');
+        const canvasWrapper = document.querySelector('.canvas-wrapper');
         const ctx = canvas.getContext('2d');
         let img = null;
         let originalImageData = null; // stores the unannotated bitmap used for cropping
@@ -286,7 +294,7 @@
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = img.width;
             tempCanvas.height = img.height;
-            const tempCtx = tempCanvas.getContext('2d');
+            const tempCtx = tempCanvas.getContext("2d");
             tempCtx.drawImage(img, 0, 0);
             originalImageData = tempCanvas.toDataURL('image/png');
             
@@ -295,10 +303,16 @@
             document.getElementById('boxList').style.display = 'block';
             document.getElementById('engineSelector').style.display = 'flex';
             
-            canvas.addEventListener('mousedown', startDrawing); // the selected boxes are now identifiable in terms of coordinates
-            canvas.addEventListener('mousemove', draw);
-            canvas.addEventListener('mouseup', stopDrawing);
-            canvas.addEventListener('mouseout', stopDrawing);
+            
+            if (!canvas.dataset.handlersRegistered) {
+                canvas.addEventListener('pointerdown', startDrawing);
+                canvas.addEventListener('pointermove', draw);
+                canvas.addEventListener('pointerup', stopDrawing);
+                canvas.addEventListener('pointercancel', stopDrawing);
+
+                canvas.dataset.handlersRegistered = 'true';
+            }
+
         }
         
         function redrawCanvas() { // draw all boxes for each current page so users can confirm selection
@@ -327,42 +341,66 @@
                 ctx.fillText(`#${index + 1}`, box.x + 5, box.y + 25);
             });
         }
+
+
+        function getCanvasCoordinates(e) {
+            const rect = canvas.getBoundingClientRect();
+
+            return {
+                x: (e.clientX - rect.left) * (canvas.width / rect.width),
+                y: (e.clientY - rect.top) * (canvas.height / rect.height)
+            };
+        }
+
         
         function startDrawing(e) {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            if (isDrawing) return;
+
+            e.preventDefault();
             isDrawing = true;
-            const rect = canvas.getBoundingClientRect();
-            startX = e.clientX - rect.left;
-            startY = e.clientY - rect.top;
+            canvas.setPointerCapture(e.pointerId);
+            const pos = getCanvasCoordinates(e);
+            startX = pos.x;
+            startY = pos.y;
         }
         
         function draw(e) {
             if (!isDrawing) return;
-            
-            const rect = canvas.getBoundingClientRect();
-            const currentX = e.clientX - rect.left;
-            const currentY = e.clientY - rect.top;
-            
-            redrawCanvas(); // redraw the canvas to update the live rectangle without permanently modifying the bitmap
-            
+
+            e.preventDefault();
+
+            const pos = getCanvasCoordinates(e);
+            const currentX = pos.x;
+            const currentY = pos.y;
+
+            redrawCanvas();
+
             ctx.strokeStyle = '#00ff00';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 3;
             ctx.setLineDash([5, 5]);
-            ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
+            ctx.strokeRect(
+                startX,
+                startY,
+                currentX - startX,
+                currentY - startY
+            );
             ctx.setLineDash([]);
         }
         
         function stopDrawing(e) {
             if (!isDrawing) return;
+
             isDrawing = false;
-            
-            const rect = canvas.getBoundingClientRect();
-            const endX = e.clientX - rect.left;
-            const endY = e.clientY - rect.top;
-            
+
+            const pos = getCanvasCoordinates(e);
+            const endX = pos.x;
+            const endY = pos.y;
+
             const width = endX - startX;
             const height = endY - startY;
-            
-            if (Math.abs(width) > 10 && Math.abs(height) > 10) { // only add box if geometry exceeds a small threshold to avoid accidental clicks
+
+            if (Math.abs(width) > 10 && Math.abs(height) > 10) {
                 boxes.push({
                     id: `box_${boxIdCounter++}`,
                     x: Math.min(startX, endX),
@@ -370,13 +408,17 @@
                     width: Math.abs(width),
                     height: Math.abs(height)
                 });
-                
-                // persist on the current page so results on multiple pages reflect this selection
+
                 allPagesData[currentPageIndex].boxes = boxes;
                 updateBoxList();
                 redrawCanvas();
             }
+
+            if (canvas.hasPointerCapture(e.pointerId)) {
+                canvas.releasePointerCapture(e.pointerId);
+            }
         }
+
         
         function updateBoxList() {
             document.getElementById('boxCount').textContent = boxes.length;

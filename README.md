@@ -1,28 +1,64 @@
-# LatexOCR_Azure
+# LatexOCR
 
 ## Demo video
 https://youtu.be/MDS35h-oiCY
 
 ## Installation
 
+### Local installation with pix2tex
+
+Use Python 3.11 for the full local OCR installation. The `requirements.txt` file
+includes pix2tex and the dependencies used by the formula detector.
+
 ```bash
-python -m venv .venv
+python3.11 -m venv .venv
+source .venv/bin/activate
 
-# PowerShell
-.\.venv\Scripts\Activate.ps1
-
-python -m pip install -r requirements.pure-python.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 
 python app.py
+```
 
-# open browser
-http://localhost:8000
+On Windows PowerShell, create and activate the environment with:
+
+```bash
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python app.py
+```
+
+Open the application at <http://localhost:8000>. The first pix2tex startup may
+download its model weights, so the machine running the application needs internet
+access the first time.
+
+### Local installation with UniMERNet
+
+UniMERNet is included in the full Docker image together with pix2tex. Its model
+files and repository are prepared by `Dockerfile.pure-python`; this is the
+recommended way to run both extraction engines:
+
+```bash
+docker compose up --build -d
+```
+
+Open <http://localhost:8000>. Select either `pix2tex` or `UniMERNet` in the
+extraction-engine selector.
+
+To run the same image without Compose:
+
+```bash
+docker build -f Dockerfile.pure-python -t latexocr:pure-python .
+docker run --rm -p 8000:8000 latexocr:pure-python
 ```
 
 ### Notes (Windows)
 
-- `requirements.pure-python.txt` intentionally avoids `pix2tex` so it can install on newer Python versions (e.g. 3.13). The server will run, but the **local** LaTeX-OCR engine may be unavailable (endpoints will return 503 for local engine).
-- If you want the full local LaTeX-OCR pipeline (`pix2tex`), use Python 3.11 and install from `requirements.txt` instead.
+- `requirements.pure-python.txt` intentionally avoids `pix2tex` and UniMERNet so it can install on newer Python versions (e.g. 3.13). The server will run, but the local OCR engines will be unavailable.
+- For local pix2tex, use Python 3.11 and install from `requirements.txt`.
+- For both pix2tex and UniMERNet, use Docker Compose or the full Docker image described above. UniMERNet requires its repository, configuration, and model files in addition to the Python packages.
 - PDF conversion via `pdf2image` on Windows requires Poppler installed and available on PATH.
 
 ## Developer: Key functions and call flow
@@ -30,18 +66,19 @@ http://localhost:8000
 This section documents the main functions and steps inside `app.py` and `formula_detector.py` so developers can quickly understand the core implementation.
 
 **`app.py`**
-- **`setup_latex_ocr_model()`**: imports and initializes the local `pix2tex` `LatexOCR` model (if available).
+- **`setup_latex_ocr_model()`**: imports and initializes the local `pix2tex` and `UniMERNet` `LatexOCR` model (if available).
 - **`ensure_latex_ocr_model_loaded()`**: thread-safe retry logic used to load the model on demand and avoid permanent 503s on transient failures.
+- **`ensure_unimernet_loaded()`**: thread-safe retry logic used to load the model on demand and avoid permanent 503s on transient failures.
 - **`convert_pdf_to_images(pdf_bytes)`**: converts a PDF binary payload into a list of `PIL.Image` pages using `pdf2image`.
-- **Azure helpers**: `azure_extract_formula_from_image(image)` and `azure_analyze_image_bytes(img_bytes)` wrap calls to Azure Document Intelligence (`prebuilt-read` + `DocumentAnalysisFeature.FORMULAS`). They return formula text or the analyze result.
+<!-- - **Azure helpers**: `azure_extract_formula_from_image(image)` and `azure_analyze_image_bytes(img_bytes)` wrap calls to Azure Document Intelligence (`prebuilt-read` + `DocumentAnalysisFeature.FORMULAS`). They return formula text or the analyze result. -->
 - **Endpoints and their flow**:
   - **`/api/simple-extract`**: full pipeline for uploaded PDFs or images. For PDFs it calls `convert_pdf_to_images()`, for each page it:
     - converts the page to a NumPy array
     - instantiates `FormulaDetector()` and calls `detect_formulas(image_array)`
     - crops each returned `(x,y,w,h)` region from the `PIL.Image`, pads/normalizes to grayscale, then calls the local `MODEL(cropped)` to produce LaTeX
   - **`/api/auto-detect-formulas`**: accepts a base64 image, decodes to `PIL.Image`, runs `FormulaDetector.detect_formulas()` and returns preview crops and bounding boxes for the frontend.
-  - **`/api/extract-boxes`**: accepts user-specified boxes (canvas coordinates) plus an `engine` parameter (`local` or `azure`). For `local` it crops, converts to `L`, and calls `MODEL(cropped)`; for `azure` it pads the crop and calls `azure_analyze_image_bytes()`.
-- **Behavior notes**: the app checks `MODEL_LOADED`/`AZURE_READY` and returns HTTP 503 when the requested engine is unavailable. Environment variables `DOCUMENT_INTELLIGENCE_ENDPOINT` and `DOCUMENT_INTELLIGENCE_SUBSCRIPTION_KEY` enable Azure mode.
+  - **`/api/extract-boxes`**: accepts user-specified boxes (canvas coordinates) plus an `engine` parameter (`pix2tex` or `UniMERNet`). It crops, converts to `L`, and calls `MODEL(cropped)`; <!-- for `azure` it pads the crop and calls `azure_analyze_image_bytes()`. -->
+<!-- - **Behavior notes**: the app checks `MODEL_LOADED`/`AZURE_READY` and returns HTTP 503 when the requested engine is unavailable. Environment variables `DOCUMENT_INTELLIGENCE_ENDPOINT` and `DOCUMENT_INTELLIGENCE_SUBSCRIPTION_KEY` enable Azure mode. -->
 
 **`formula_detector.py`**
 - **`FormulaDetector`**: the main detection class used by `app.py`.
@@ -68,26 +105,25 @@ curl.exe -X POST http://localhost:8000/api/simple-extract `
   -H "accept: application/json"
 ```
 
-## Docker + Azure Container App
+<!-- ## Docker + Azure Container App
 
 
 ```bash
 docker build -t latexocr:latest .
 
 # one time testing command since the image is going to be public
-docker run -p 8000:8000 -e DOCUMENT_INTELLIGENCE_ENDPOINT="" -e DOCUMENT_INTELLIGENCE_SUBSCRIPTION_KEY="" latexocr:latest
+docker run -p 8000:8000 -e DOCUMENT_INTELLIGENCE_ENDPOINT="" -e DOCUMENT_INTELLIGENCE_SUBSCRIPTION_KEY="" latexocr:latest -->
 
-# access at http://localhost:8000
 ```
 
-Pure-python oriented Dockerfile (no pix2tex):
+Pure-python oriented Dockerfile (pix2tex and UniMERNet):
 
 ```bash
 docker build -f Dockerfile.pure-python -t latexocr:pure-python .
 docker run --rm -p 8000:8000 latexocr:pure-python
 ```
 
-Docker Compose (pure-python):
+Docker Compose:
 
 ```bash
 # build + start (runs in the background)
@@ -107,6 +143,8 @@ docker compose restart
 
 # stop and remove containers
 docker compose down
+
+# access at http://localhost:8000
 ```
 
 ## Kubernetes (Minikube)
@@ -199,7 +237,7 @@ docker pull andialexandrescu/latexocr:latest
 docker run -p 8000:8000 andialexandrescu/latexocr:latest
 ```
 
-When creating the container app, add environment variables:
+<!-- When creating the container app, add environment variables:
 
 DOCUMENT_INTELLIGENCE_ENDPOINT = ...
 DOCUMENT_INTELLIGENCE_SUBSCRIPTION_KEY = ...
@@ -219,4 +257,4 @@ az containerapp update `
   --name $CONTAINER_APP_NAME `
   --resource-group $RESOURCE_GROUP `
   --image "andialexandrescu/latexocr:$TAG"
-```
+``` -->

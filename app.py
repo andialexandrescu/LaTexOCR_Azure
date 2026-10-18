@@ -1,23 +1,17 @@
-import os
-import io
-import logging
-import tempfile
-import base64
-import threading
-from typing import Dict, List, Tuple
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+import numpy as np, os, io, logging, base64, threading, argparse, torch
+from typing import List
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from PIL import Image, ImageOps
-import numpy as np
 from formula_detector import FormulaDetector
-from dotenv import load_dotenv
-from azure.ai.documentintelligence import DocumentIntelligenceClient
-from azure.core.credentials import AzureKeyCredential
-from azure.ai.documentintelligence.models import DocumentAnalysisFeature, AnalyzeResult
-from azure.core.exceptions import HttpResponseError
+# from dotenv import load_dotenv
+# from azure.ai.documentintelligence import DocumentIntelligenceClient
+# from azure.core.credentials import AzureKeyCredential
+# from azure.ai.documentintelligence.models import DocumentAnalysisFeature, AnalyzeResult
+# from azure.core.exceptions import HttpResponseError
 
 # this logger captures backend events (model load, pdf conversion, box processing)
 logging.basicConfig(level=logging.INFO)
@@ -111,24 +105,97 @@ except Exception as e:
     MODEL_LOAD_ERROR = f"{type(e).__name__}: {e}"
     logger.exception("latex-ocr model failed to load")
 
-load_dotenv()
-AZURE_ENDPOINT = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT")
-AZURE_KEY = os.getenv("DOCUMENT_INTELLIGENCE_SUBSCRIPTION_KEY")
-AZURE_CLIENT = None
-AZURE_READY = False
+# load_dotenv()
+# AZURE_ENDPOINT = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT")
+# AZURE_KEY = os.getenv("DOCUMENT_INTELLIGENCE_SUBSCRIPTION_KEY")
+# AZURE_CLIENT = None
+# AZURE_READY = False
 
-if AZURE_ENDPOINT and AZURE_KEY:
-    try:
-        AZURE_CLIENT = DocumentIntelligenceClient(
-            endpoint=AZURE_ENDPOINT,
-            credential=AzureKeyCredential(AZURE_KEY)
-        )
-        AZURE_READY = True
-        logger.info("Azure Document Intelligence client initialized")
-    except Exception as e:
-        logger.warning(f"Azure Document Intelligence client failed to initialize: {e}")
-else:
-    logger.info("Azure Document Intelligence credentials not found")
+# if AZURE_ENDPOINT and AZURE_KEY:
+#     try:
+#         AZURE_CLIENT = DocumentIntelligenceClient(
+#             endpoint=AZURE_ENDPOINT,
+#             credential=AzureKeyCredential(AZURE_KEY)
+#         )
+#         AZURE_READY = True
+#         logger.info("Azure Document Intelligence client initialized")
+#     except Exception as e:
+#         logger.warning(f"Azure Document Intelligence client failed to initialize: {e}")
+# else:
+#     logger.info("Azure Document Intelligence credentials not found")
+
+
+# ---------------- UniMERNet model ----------------
+
+UNIMERNET_CONFIG = "/app/UniMERNet/configs/demo.yaml"
+
+UNIMERNET_MODEL = None
+UNIMERNET_PROCESSOR = None
+UNIMERNET_DEVICE = None
+UNIMERNET_LOADED = False
+UNIMERNET_LOAD_ERROR = None
+
+UNIMERNET_LOCK = threading.Lock()
+
+
+def ensure_unimernet_loaded():
+    from unimernet.common.config import Config
+    from unimernet.processors import load_processor
+    import unimernet.tasks as unimernet_tasks
+
+    global UNIMERNET_MODEL
+    global UNIMERNET_PROCESSOR
+    global UNIMERNET_DEVICE
+    global UNIMERNET_LOADED
+    global UNIMERNET_LOAD_ERROR
+
+    if UNIMERNET_LOADED:
+        return
+
+    with UNIMERNET_LOCK:
+        if UNIMERNET_LOADED:
+            return
+
+        try:
+            if not os.path.isfile(UNIMERNET_CONFIG):
+                raise FileNotFoundError(f"UniMERNet config not found: {UNIMERNET_CONFIG}")
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            args = argparse.Namespace(cfg_path=UNIMERNET_CONFIG, options=None)
+
+            cfg = Config(args)
+            task = unimernet_tasks.setup_task(cfg)
+            model = task.build_model(cfg).to(device)
+            model.eval()
+
+            processor = load_processor("formula_image_eval", cfg.config.datasets.formula_rec_eval.vis_processor.eval)
+
+            UNIMERNET_MODEL = model
+            UNIMERNET_PROCESSOR = processor
+            UNIMERNET_DEVICE = device
+            UNIMERNET_LOADED = True
+            UNIMERNET_LOAD_ERROR = None
+
+            logger.info("UniMERNet loaded on %s", device)
+
+        except Exception as e:
+            UNIMERNET_LOADED = False
+            UNIMERNET_LOAD_ERROR = f"{type(e).__name__}: {e}"
+            logger.exception("UniMERNet model failed to load")
+            raise
+
+
+def unimernet_extract_formula(image: Image.Image) -> str:
+    ensure_unimernet_loaded()
+
+    image = image.convert("RGB")
+    tensor = UNIMERNET_PROCESSOR(image).unsqueeze(0)
+    tensor = tensor.to(UNIMERNET_DEVICE)
+
+    with torch.inference_mode():
+        output = UNIMERNET_MODEL.generate({"image": tensor})
+
+    return output["pred_str"][0].strip()
+
 
 def convert_pdf_to_images(pdf_bytes: bytes) -> List[Image.Image]: # converts a binary pdf payload to a list of PIL.Image pages using pdf2image
     try:
@@ -144,41 +211,41 @@ def convert_pdf_to_images(pdf_bytes: bytes) -> List[Image.Image]: # converts a b
         logger.error(f"Error converting pdf to images: {e}")
         return []
 
-def azure_extract_formula_from_image(image: Image.Image) -> str:
-    if not AZURE_READY or not AZURE_CLIENT:
-        raise HTTPException(status_code=503, detail="Azure Document Intelligence not configured")
+# def azure_extract_formula_from_image(image: Image.Image) -> str:
+#     if not AZURE_READY or not AZURE_CLIENT:
+#         raise HTTPException(status_code=503, detail="Azure Document Intelligence not configured")
 
-    buf = io.BytesIO()
-    image.save(buf, format="PNG")
-    image_bytes = buf.getvalue()
+#     buf = io.BytesIO()
+#     image.save(buf, format="PNG")
+#     image_bytes = buf.getvalue()
 
-    poller = AZURE_CLIENT.begin_analyze_document(
-        model_id="prebuilt-read",
-        body=image_bytes,
-        features=[DocumentAnalysisFeature.FORMULAS]
-    )
-    result = poller.result()
+#     poller = AZURE_CLIENT.begin_analyze_document(
+#         model_id="prebuilt-read",
+#         body=image_bytes,
+#         features=[DocumentAnalysisFeature.FORMULAS]
+#     )
+#     result = poller.result()
 
-    formulas = []
-    for page in result.pages:
-        if hasattr(page, "formulas") and page.formulas:
-            for formula in page.formulas:
-                formulas.append(getattr(formula, "value", ""))
+#     formulas = []
+#     for page in result.pages:
+#         if hasattr(page, "formulas") and page.formulas:
+#             for formula in page.formulas:
+#                 formulas.append(getattr(formula, "value", ""))
 
-    if formulas:
-        return formulas[0] # returns the first detected formula value
+#     if formulas:
+#         return formulas[0] # returns the first detected formula value
 
-    return result.content.strip() if hasattr(result, "content") else "" # return content text if no formulas
+#     return result.content.strip() if hasattr(result, "content") else "" # return content text if no formulas
 
-def azure_analyze_image_bytes(img_bytes: bytes):
-    if not AZURE_READY or not AZURE_CLIENT:
-        raise HTTPException(status_code=503, detail="Azure Document Intelligence not configured")
-    poller = AZURE_CLIENT.begin_analyze_document(
-        model_id="prebuilt-read",
-        body=img_bytes,
-        features=[DocumentAnalysisFeature.FORMULAS]
-    )
-    return poller.result()
+# def azure_analyze_image_bytes(img_bytes: bytes):
+#     if not AZURE_READY or not AZURE_CLIENT:
+#         raise HTTPException(status_code=503, detail="Azure Document Intelligence not configured")
+#     poller = AZURE_CLIENT.begin_analyze_document(
+#         model_id="prebuilt-read",
+#         body=img_bytes,
+#         features=[DocumentAnalysisFeature.FORMULAS]
+#     )
+#     return poller.result()
 
 @app.post("/api/simple-extract")
 async def simple_extract(file: UploadFile = File(...)): # simplified endpoint that uses FormulaDetector to automatically detect and extract formulas from pdf pages
@@ -186,11 +253,7 @@ async def simple_extract(file: UploadFile = File(...)): # simplified endpoint th
         # Retry model loading on demand to recover from transient startup failures
         ensure_latex_ocr_model_loaded()
     if not MODEL_LOADED:
-        raise HTTPException(
-            status_code=503,
-            detail=f"LaTeX-OCR model not loaded. {MODEL_LOAD_ERROR or ''}".strip()
-        )
-    
+        raise HTTPException(status_code=503, detail=f"LaTeX-OCR model not loaded. {MODEL_LOAD_ERROR or ''}".strip())
     try:
         contents = await file.read()
         filename = file.filename.lower()
@@ -352,11 +415,19 @@ async def extract_boxes(request: BoxExtractionRequest): # extracts latex from us
             status_code=503,
             detail=f"LaTeX-OCR model not loaded. {MODEL_LOAD_ERROR or ''}".strip()
         )
-    if engine == "azure" and not AZURE_READY:
-        raise HTTPException(
-            status_code=503,
-            detail="Azure Document Intelligence not configured"
-        )
+    if engine == "unimernet":
+        try:
+            ensure_unimernet_loaded()
+        except Exception as e:
+            raise HTTPException(
+                status_code=503,
+                detail=f"UniMERNet failed to load: {e}",
+            )
+    # if engine == "azure" and not AZURE_READY:
+    #     raise HTTPException(
+    #         status_code=503,
+    #         detail="Azure Document Intelligence not configured"
+    #     )
     
     try:
         image_data = request.imageData.split(',')[1] if ',' in request.imageData else request.imageData
@@ -365,64 +436,64 @@ async def extract_boxes(request: BoxExtractionRequest): # extracts latex from us
         
         results = []
 
-        if engine == "azure": # analyze each box with white padding to avoid nearby text
-            try:
-                for box in request.boxes:
-                    x = int(box.x)
-                    y = int(box.y)
-                    w = int(box.width)
-                    h = int(box.height)
+        # if engine == "azure": # analyze each box with white padding to avoid nearby text
+        #     try:
+        #         for box in request.boxes:
+        #             x = int(box.x)
+        #             y = int(box.y)
+        #             w = int(box.width)
+        #             h = int(box.height)
 
-                    cropped = image.crop((x, y, x + w, y + h))
-                    padding_azure=40
-                    cropped = ImageOps.expand(cropped, border=padding_azure, fill='white') # add white padding only
+        #             cropped = image.crop((x, y, x + w, y + h))
+        #             padding_azure=40
+        #             cropped = ImageOps.expand(cropped, border=padding_azure, fill='white') # add white padding only
 
-                    buf = io.BytesIO()
-                    cropped.save(buf, format="PNG")
-                    cropped_bytes = buf.getvalue()
-                    processed_b64 = "data:image/png;base64," + base64.b64encode(cropped_bytes).decode()
-                    result = azure_analyze_image_bytes(cropped_bytes)
+        #             buf = io.BytesIO()
+        #             cropped.save(buf, format="PNG")
+        #             cropped_bytes = buf.getvalue()
+        #             processed_b64 = "data:image/png;base64," + base64.b64encode(cropped_bytes).decode()
+        #             result = azure_analyze_image_bytes(cropped_bytes)
 
-                    page_num = result.pages[0].page_number if result.pages else 1
+        #             page_num = result.pages[0].page_number if result.pages else 1
 
-                    found = False
-                    for page in result.pages:
-                        if hasattr(page, "formulas") and page.formulas:
-                            for formula in page.formulas:
-                                formula_value = getattr(formula, "value", "")
-                                results.append({
-                                    "box_id": box.id,
-                                    "engine": engine,
-                                    "latex": formula_value,
-                                    "page": page.page_number,
-                                    "region": {"x": x, "y": y, "width": w, "height": h},
-                                    "processed_image": processed_b64,
-                                    "padding": padding_azure
-                                })
-                                found = True
-                    if not found:
-                        # return content text if no formulas detected
-                        fallback_text = result.content.strip() if hasattr(result, "content") else ""
-                        results.append({
-                            "box_id": box.id,
-                            "engine": engine,
-                            "latex": fallback_text,
-                            "page": page_num,
-                            "region": {"x": x, "y": y, "width": w, "height": h},
-                            "processed_image": processed_b64,
-                            "padding": padding_azure
-                        })
+        #             found = False
+        #             for page in result.pages:
+        #                 if hasattr(page, "formulas") and page.formulas:
+        #                     for formula in page.formulas:
+        #                         formula_value = getattr(formula, "value", "")
+        #                         results.append({
+        #                             "box_id": box.id,
+        #                             "engine": engine,
+        #                             "latex": formula_value,
+        #                             "page": page.page_number,
+        #                             "region": {"x": x, "y": y, "width": w, "height": h},
+        #                             "processed_image": processed_b64,
+        #                             "padding": padding_azure
+        #                         })
+        #                         found = True
+        #             if not found:
+        #                 # return content text if no formulas detected
+        #                 fallback_text = result.content.strip() if hasattr(result, "content") else ""
+        #                 results.append({
+        #                     "box_id": box.id,
+        #                     "engine": engine,
+        #                     "latex": fallback_text,
+        #                     "page": page_num,
+        #                     "region": {"x": x, "y": y, "width": w, "height": h},
+        #                     "processed_image": processed_b64,
+        #                     "padding": padding_azure
+        #                 })
 
-                return JSONResponse({
-                    "total_boxes": len(request.boxes),
-                    "engine": engine,
-                    "results": results,
-                    "formula_count": len(results)
-                })
-            except Exception as e:
-                logger.error(f"Azure extraction error: {e}")
-                raise HTTPException(status_code=500, detail=f"Azure extraction error: {str(e)}")
-        if engine == "local": # local/ pix2tex path
+        #         return JSONResponse({
+        #             "total_boxes": len(request.boxes),
+        #             "engine": engine,
+        #             "results": results,
+        #             "formula_count": len(results)
+        #         })
+        #     except Exception as e:
+        #         logger.error(f"Azure extraction error: {e}")
+        #         raise HTTPException(status_code=500, detail=f"Azure extraction error: {str(e)}")
+        if engine in {"local", "pix2tex", "unimernet"}: # local/ pix2tex path
             for box in request.boxes: # calculate pixel coordinates from client sent floats
                 x = int(box.x)
                 y = int(box.y)
@@ -438,7 +509,10 @@ async def extract_boxes(request: BoxExtractionRequest): # extracts latex from us
                     cropped.save(buf, format="PNG")
                     processed_b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
-                    latex_code = MODEL(cropped)
+                    if engine == "unimernet":
+                        latex_code = unimernet_extract_formula(cropped)
+                    else:
+                        latex_code = MODEL(cropped)
                     
                     results.append({
                         "box_id": box.id,
