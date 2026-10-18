@@ -8,6 +8,18 @@ pix2tex==0.1.2
 pdf2image==1.16.3
 # PyPDF2==3.0.1
 pymupdf>=1.23.0
+pyarrow==14.0.2 
+datasets==2.19.2 
+evaluate==0.4.2 
+omegaconf 
+iopath 
+rapidfuzz 
+timm 
+transformers==4.42.4 
+fairscale 
+ftfy 
+albumentations 
+webdataset
 # python-dotenv==1.0.0
 # azure-ai-documentintelligence==1.0.0
 # azure-core==1.30.0

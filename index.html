@@ -60,7 +60,7 @@
         <div class="alert alert-light mb-4" style="background: rgba(255,255,255,0.95); border: none; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
             <h5>Usage</h5>
             <ol class="mb-0">
-                <li>Upload an image (.png, .jpg) or a pdf file</li>
+                <li>Upload an image (.png, .jpg, .jpeg) or a pdf file</li>
                 <li>Draw boxes around the mathematical formulas you want to extract</li>
                 <li>Keep the following in mind when choosing extraction engine</li> 
                 <ul>- If choosing pix2tex don't inlcude text since it may cause issues with the formula extraction</ul>
@@ -71,7 +71,7 @@
         
         <div class="upload-section text-center mb-3" id="uploadSection" onclick="document.getElementById('fileInput').click()">
             <h3>Click to select file</h3>
-            <p class="text-white">.pdf, .png, .jpg (for pdf files, all pages will be processed)</p>
+            <p class="text-white">.pdf, .png, .jpg, .jpeg (for pdf files, all pages will be processed)</p>
             <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg" class="d-none">
         </div>
         

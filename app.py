@@ -1,11 +1,4 @@
-import numpy as np
-import os
-import io
-import logging
-import base64
-import threading
-import argparse
-import torch
+import numpy as np, os, io, logging, base64, threading, argparse, torch
 from typing import List
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
@@ -165,28 +158,16 @@ def ensure_unimernet_loaded():
 
         try:
             if not os.path.isfile(UNIMERNET_CONFIG):
-                raise FileNotFoundError(
-                    f"UniMERNet config not found: {UNIMERNET_CONFIG}"
-                )
-
-            device = torch.device(
-                "cuda" if torch.cuda.is_available() else "cpu"
-            )
-
-            args = argparse.Namespace(
-                cfg_path=UNIMERNET_CONFIG,
-                options=None,
-            )
+                raise FileNotFoundError(f"UniMERNet config not found: {UNIMERNET_CONFIG}")
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            args = argparse.Namespace(cfg_path=UNIMERNET_CONFIG, options=None)
 
             cfg = Config(args)
             task = unimernet_tasks.setup_task(cfg)
             model = task.build_model(cfg).to(device)
             model.eval()
 
-            processor = load_processor(
-                "formula_image_eval",
-                cfg.config.datasets.formula_rec_eval.vis_processor.eval,
-            )
+            processor = load_processor("formula_image_eval", cfg.config.datasets.formula_rec_eval.vis_processor.eval)
 
             UNIMERNET_MODEL = model
             UNIMERNET_PROCESSOR = processor
@@ -272,11 +253,7 @@ async def simple_extract(file: UploadFile = File(...)): # simplified endpoint th
         # Retry model loading on demand to recover from transient startup failures
         ensure_latex_ocr_model_loaded()
     if not MODEL_LOADED:
-        raise HTTPException(
-            status_code=503,
-            detail=f"LaTeX-OCR model not loaded. {MODEL_LOAD_ERROR or ''}".strip()
-        )
-    
+        raise HTTPException(status_code=503, detail=f"LaTeX-OCR model not loaded. {MODEL_LOAD_ERROR or ''}".strip())
     try:
         contents = await file.read()
         filename = file.filename.lower()
