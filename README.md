@@ -1,4 +1,4 @@
-# LatexOCR_Azure
+# LatexOCR
 
 ## Demo video
 https://youtu.be/MDS35h-oiCY
